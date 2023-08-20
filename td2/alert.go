@@ -392,6 +392,13 @@ func (c *Config) alert(chainName, message, severity string, resolved bool, id *s
 	alarms.AllAlarms[chainName][message] = time.Now()
 }
 
+type ChainConfig struct {
+    // ... (existing fields)
+    consecutiveMissedBlocks []time.Time
+    consecutiveThresholds   []int
+    // ... (other fields)
+}
+
 // watch handles monitoring for missed blocks, stalled chain, node downtime
 // and also updates a few prometheus stats
 // FIXME: not watching for nodes that are lagging the head block!
@@ -518,32 +525,36 @@ func (cc *ChainConfig) watch() {
 			}
 		}
 
-		// consecutive missed block alarms:
-		if !missedAlarm && cc.Alerts.ConsecutiveAlerts && int(cc.statConsecutiveMiss) >= cc.Alerts.ConsecutiveMissed {
-			// alert on missed block counter!
-			missedAlarm = true
-			id := cc.valInfo.Valcons + "consecutive"
-			td.alert(
-				cc.name,
-				fmt.Sprintf("%s has missed %d blocks on %s", cc.valInfo.Moniker, cc.Alerts.ConsecutiveMissed, cc.ChainId),
-				cc.Alerts.ConsecutivePriority,
-				false,
-				&id,
-			)
-			cc.activeAlerts = alarms.getCount(cc.name)
-		} else if missedAlarm && int(cc.statConsecutiveMiss) < cc.Alerts.ConsecutiveMissed {
-			// clear the alert
-			missedAlarm = false
-			id := cc.valInfo.Valcons + "consecutive"
-			td.alert(
-				cc.name,
-				fmt.Sprintf("%s has missed %d blocks on %s", cc.valInfo.Moniker, cc.Alerts.ConsecutiveMissed, cc.ChainId),
-				"info",
-				true,
-				&id,
-			)
-			cc.activeAlerts = alarms.getCount(cc.name)
-		}
+		
+	       // consecutive missed block alarms:
+		   for _, threshold := range cc.consecutiveThresholds {
+			if len(cc.consecutiveMissedBlocks) >= threshold {
+				// alert on consecutive missed block threshold
+				missedAlarm = true
+				id := cc.valInfo.Valcons + "consecutive"
+				cc.alert(
+					cc.name,
+					fmt.Sprintf("%s has missed %d consecutive blocks on %s", cc.valInfo.Moniker, len(cc.consecutiveMissedBlocks), cc.ChainId),
+					"critical", // Adjust severity based on your needs
+					false,
+					&id,
+				)
+				cc.activeAlerts = alarms.getCount(cc.name)
+			
+			} else {
+				// Clear the alert if resolved
+				id := cc.valInfo.Valcons + "consecutive"
+				cc.alert(
+					cc.name,
+					fmt.Sprintf("%s has missed %d consecutive blocks on %s", cc.valInfo.Moniker, len(cc.consecutiveMissedBlocks), cc.ChainId),
+					"info", // Adjust severity based on your needs
+					true,   // Set resolved to true to clear the alert
+					&id,
+				)
+				cc.activeAlerts = alarms.getCount(cc.name)
+			}
+		
+        }
 
 		// window percentage missed block alarms
 		if cc.Alerts.PercentageAlerts && !pctAlarm && 100*float64(cc.valInfo.Missed)/float64(cc.valInfo.Window) > float64(cc.Alerts.Window) {
